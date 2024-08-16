@@ -1,1 +1,6 @@
+# Nix
+/result
+/result-man
+
+# Cargo
 /target
