@@ -3,7 +3,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
-use syn::{parse_quote, Expr, Path, Token};
+use syn::{parse_quote, Expr, ExprLit, Lit, LitStr, Path, Token};
 
 pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2>) -> TokenStream1 {
     tokens2()
@@ -23,8 +23,7 @@ pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
                 Some(FormatPunct::Semi(_)) => format_str.push_str("{}\n"),
                 None | Some(FormatPunct::None) => format_str.push_str("{}"),
             }
-            let display = styled.into_expr();
-            format_args.push(parse_quote!(#display));
+            format_args.push(styled.into_expr());
         }
         Ok(quote! {
             format_args!(#format_str, #format_args)
@@ -32,11 +31,16 @@ pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
     })
 }
 
-type FormatSeq = Punctuated<ExprOpsSeq, FormatPunct>;
+type FormatSeq = Punctuated<FormatSeg, FormatPunct>;
 
-struct ExprOpsSeq {
+struct FormatSeg {
     ops: Vec<(Token![:], Path)>,
-    expr: Expr,
+    expr: FormatExpr,
+}
+
+enum FormatExpr {
+    Format(LitStr),
+    Verbatim(Expr),
 }
 
 enum FormatPunct {
@@ -45,21 +49,24 @@ enum FormatPunct {
     None,
 }
 
-impl ExprOpsSeq {
+impl FormatSeg {
     fn into_expr(self) -> Expr {
-        let expr = &self.expr;
         let ops = self.ops.iter().map(|(_, path)| path);
+        let expr = match self.expr {
+            FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
+            FormatExpr::Verbatim(expr) => expr,
+        };
         parse_quote!( #expr #( .#ops() )* )
     }
 }
 
-impl From<ExprOpsSeq> for Expr {
-    fn from(value: ExprOpsSeq) -> Self {
+impl From<FormatSeg> for Expr {
+    fn from(value: FormatSeg) -> Self {
         value.into_expr()
     }
 }
 
-impl Parse for ExprOpsSeq {
+impl Parse for FormatSeg {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut ops = Vec::new();
         while !input.is_empty() {
@@ -69,10 +76,21 @@ impl Parse for ExprOpsSeq {
                 break;
             }
         }
-        let expr = input
-            .parse::<Expr>()
-            .map_err(|e| syn::Error::new(e.span(), "expected an expression or a format string"))?;
+        let expr = input.parse()?;
         Ok(Self { ops, expr })
+    }
+}
+
+// TODO: attrs are silently removed
+impl Parse for FormatExpr {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        match input.parse::<Expr>()? {
+            Expr::Lit(ExprLit {
+                attrs: _, // can the format literal have attributes?
+                lit: Lit::Str(format),
+            }) => Ok(Self::Format(format)),
+            expr => Ok(Self::Verbatim(expr)),
+        }
     }
 }
 
