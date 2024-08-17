@@ -3,7 +3,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
-use syn::{parse_quote, Expr, ExprLit, Lit, LitStr, Path, Token};
+use syn::{parse_quote, Expr, ExprLit, ExprMethodCall, Lit, LitStr, Path, Token};
 
 pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2>) -> TokenStream1 {
     tokens2()
@@ -34,8 +34,12 @@ pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
 type FormatSeq = Punctuated<FormatSeg, FormatPunct>;
 
 struct FormatSeg {
-    ops: Vec<(Token![:], Path)>,
+    ops: Vec<(Token![:], FormatOp)>,
     expr: FormatExpr,
+}
+
+enum FormatOp {
+    MethodPath(Path),
 }
 
 enum FormatExpr {
@@ -51,12 +55,14 @@ enum FormatPunct {
 
 impl FormatSeg {
     fn into_expr(self) -> Expr {
-        let ops = self.ops.iter().map(|(_, path)| path);
+        let ops = self.ops.into_iter().map(|(_, op)| match op {
+            FormatOp::MethodPath(method) => quote!( #method() ),
+        });
         let expr = match self.expr {
             FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
             FormatExpr::Verbatim(expr) => expr,
         };
-        parse_quote!( #expr #( .#ops() )* )
+        parse_quote!( #expr #( .#ops )* )
     }
 }
 
@@ -71,13 +77,19 @@ impl Parse for FormatSeg {
         let mut ops = Vec::new();
         while !input.is_empty() {
             if input.peek(Token![:]) {
-                ops.push((input.parse::<Token![:]>().unwrap(), input.parse::<Path>()?));
+                ops.push((input.parse().unwrap(), input.parse()?));
             } else {
                 break;
             }
         }
         let expr = input.parse()?;
         Ok(Self { ops, expr })
+    }
+}
+
+impl Parse for FormatOp {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Self::MethodPath(input.parse()?))
     }
 }
 
