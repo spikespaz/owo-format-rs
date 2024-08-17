@@ -1,5 +1,5 @@
-use owo_colors::colors::css::{Orange, OrangeRed};
-use owo_colors::OwoColorize;
+use owo_colors::colors::css::Orange;
+use owo_colors::{CssColors, OwoColorize, Style};
 use owo_format::format_args_colored;
 
 macro_rules! format_colored {
@@ -30,6 +30,9 @@ fn main() {
     // Custom coloring
     logln!(:bold :fg::<Orange> :bg_rgb::<33, 50, 12> "custom foreground on custom background");
     // format_args_colored!(:bold :color(Orange) :on_color((33, 50, 12)) "custom foreground on custom background");
+    let hacker = Style::new().bright_green().bg_rgb::<0, 0, 0>().bold();
+    logln!(:style(hacker) "hacker text");
+    logln!(:color(CssColors::DeepSkyBlue) "CSS Deep Sky Blue");
 
     // Concatenation
     logln!("text" "concatenated" :red "without" "spaces");

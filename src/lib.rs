@@ -3,7 +3,11 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
-use syn::{parse_quote, Expr, ExprLit, ExprMethodCall, Lit, LitStr, Path, Token};
+use syn::token::Paren;
+use syn::{
+    parenthesized, parse_quote, AngleBracketedGenericArguments, Expr, ExprLit, ExprMethodCall,
+    Ident, Lit, LitStr, Token,
+};
 
 pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2>) -> TokenStream1 {
     tokens2()
@@ -34,12 +38,27 @@ pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
 type FormatSeq = Punctuated<FormatSeg, FormatPunct>;
 
 struct FormatSeg {
-    ops: Vec<(Token![:], FormatOp)>,
-    expr: FormatExpr,
+    pub ops: Vec<(Token![:], FormatOp)>,
+    pub expr: FormatExpr,
 }
 
 enum FormatOp {
-    MethodPath(Path),
+    Method(TraitMethod),
+    MethodCall(TraitMethodCall),
+}
+
+struct TraitMethod {
+    // pub attrs: Vec<Attribute>,
+    pub method: Ident,
+    pub turbofish: Option<AngleBracketedGenericArguments>,
+}
+
+struct TraitMethodCall {
+    // pub attrs: Vec<Attribute>,
+    pub method: Ident,
+    pub turbofish: Option<AngleBracketedGenericArguments>,
+    pub paren_token: Paren,
+    pub args: Punctuated<Expr, Token![,]>,
 }
 
 enum FormatExpr {
@@ -55,14 +74,38 @@ enum FormatPunct {
 
 impl FormatSeg {
     fn into_expr(self) -> Expr {
-        let ops = self.ops.into_iter().map(|(_, op)| match op {
-            FormatOp::MethodPath(method) => quote!( #method() ),
-        });
         let expr = match self.expr {
             FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
             FormatExpr::Verbatim(expr) => expr,
         };
-        parse_quote!( #expr #( .#ops )* )
+        self.ops.into_iter().fold(expr, |acc, (_, op)| {
+            Expr::MethodCall(op.into_call_with_expr(acc))
+        })
+    }
+}
+
+impl FormatOp {
+    fn into_call_with_expr(self, expr: Expr) -> ExprMethodCall {
+        match self {
+            Self::Method(method) => ExprMethodCall {
+                attrs: Vec::new(),
+                receiver: Box::new(expr),
+                dot_token: <Token![.]>::default(),
+                method: method.method,
+                turbofish: method.turbofish,
+                paren_token: Paren::default(),
+                args: Punctuated::new(),
+            },
+            Self::MethodCall(method) => ExprMethodCall {
+                attrs: Vec::new(),
+                receiver: Box::new(expr),
+                dot_token: <Token![.]>::default(),
+                method: method.method,
+                turbofish: method.turbofish,
+                paren_token: method.paren_token,
+                args: method.args,
+            },
+        }
     }
 }
 
@@ -89,7 +132,23 @@ impl Parse for FormatSeg {
 
 impl Parse for FormatOp {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(Self::MethodPath(input.parse()?))
+        let method = input.parse()?;
+        let turbofish = if input.peek(Token![::]) {
+            Some(AngleBracketedGenericArguments::parse_turbofish(input)?)
+        } else {
+            None
+        };
+        if input.peek(Paren) {
+            let content;
+            Ok(Self::MethodCall(TraitMethodCall {
+                method,
+                turbofish,
+                paren_token: parenthesized!(content in input),
+                args: content.parse_terminated(Expr::parse, Token![,])?,
+            }))
+        } else {
+            Ok(Self::Method(TraitMethod { method, turbofish }))
+        }
     }
 }
 
