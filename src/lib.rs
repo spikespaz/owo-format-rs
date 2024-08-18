@@ -25,7 +25,7 @@ pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
             match punct {
                 Some(FormatPunct::Comma(_)) => format_str.push_str("{} "),
                 Some(FormatPunct::Semi(_)) => format_str.push_str("{}\n"),
-                None | Some(FormatPunct::None) => format_str.push_str("{}"),
+                None | Some(FormatPunct::Concat) => format_str.push_str("{}"),
             }
             format_args.push(styled.into_expr());
         }
@@ -69,7 +69,7 @@ enum FormatExpr {
 enum FormatPunct {
     Comma(#[allow(dead_code)] Token![,]),
     Semi(#[allow(dead_code)] Token![;]),
-    None,
+    Concat,
 }
 
 impl FormatSeg {
@@ -172,7 +172,7 @@ impl Parse for FormatPunct {
         } else if input.peek(Token![;]) {
             Ok(Self::Semi(input.parse().unwrap()))
         } else {
-            Ok(Self::None)
+            Ok(Self::Concat)
         }
     }
 }
