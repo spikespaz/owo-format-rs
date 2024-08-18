@@ -197,7 +197,7 @@ impl Parse for FormatExpr {
             Expr::Path(ExprPath { path, .. }) if path.get_ident().is_some() => {
                 Err(syn::Error::new(
                     path.span(),
-                    "bare identifiers are ambiguous, please reference or wrap with an expression",
+                    "bare identifiers are disallowed, please reference or wrap with an expression",
                 ))
             }
             Expr::Call(expr_call) => match expr_call.func.as_ref() {
