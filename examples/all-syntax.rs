@@ -42,6 +42,9 @@ fn main() {
     // Debug can be done as a string literal
     logln!("This is a debug format:", :purple "{EXAMPLE_DEBUG:?}");
 
+    // Formatting can be escaped
+    logln!(:cyan &"This is not {formatted}");
+
     // Bare identifiers should not work
     // This is to disambiguate from function identifiers.
     // format_args_colored!(:bright_red fail);
@@ -57,7 +60,7 @@ fn main() {
     format_args_colored!(:green (ok) :blue (ok));
     // If they are punctuated with `Concat`, parentheses are ambiguous.
     // format_args_colored!(:green (ok) (ok) (ok));
-    // format_args_colored!(:green (ok) {ok} (ok));
+    // format_args_colored!(:green() std::env::args());
 
     // Expressions don't need to have braces or parentheses.
     logln!(
@@ -75,4 +78,11 @@ fn main() {
         let (a, b) = (5, 5);
         a + b
     });
+
+    // Now this macro supports recursion too!
+    let style_paren = Style::new().dimmed().white().on_black();
+    let style_single_quote = Style::new().yellow().on_blue();
+    let style_text = Style::new().bright_cyan().on_purple();
+    logln!(:style(style_paren) .{ "(" :style(style_single_quote) .{"'" :style(style_text) "text" "'"} ")"});
+    logln!(:bright_red .{ "(" :green .{"'" :bold "quoted" "'"} ")" });
 }

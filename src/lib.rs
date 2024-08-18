@@ -4,10 +4,10 @@ use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned as _;
-use syn::token::Paren;
+use syn::token::{Brace, Paren};
 use syn::{
-    parenthesized, parse_quote, AngleBracketedGenericArguments, Expr, ExprLit, ExprMethodCall,
-    ExprPath, Ident, Lit, LitStr, Token,
+    braced, parenthesized, parse_quote, AngleBracketedGenericArguments, Expr, ExprLit,
+    ExprMethodCall, ExprPath, Ident, Lit, LitStr, Token,
 };
 
 pub(crate) fn proc_macro_impl<T: ToTokens>(
@@ -61,6 +61,12 @@ struct TraitMethodCall {
 
 enum FormatExpr {
     Format(LitStr),
+    #[allow(dead_code)]
+    Seq {
+        dot: Token![.],
+        brace: Brace,
+        seq: FormatSeq,
+    },
     Verbatim(Expr),
 }
 
@@ -136,8 +142,12 @@ impl Parse for FormatOp {
             #[allow(clippy::if_same_then_else)]
             if ahead.is_empty() {
                 Ok(FormatOp::Method(method))
-            } else if ahead.cursor().punct().is_some() {
-                Ok(FormatOp::Method(method))
+            } else if let Some((punct, _cursor)) = ahead.cursor().punct() {
+                match punct.as_char() {
+                    ':' | ',' | ';' => Ok(FormatOp::Method(method)),
+                    '.' => Ok(FormatOp::MethodCall(method.parse_args(input)?)),
+                    _ => Ok(FormatOp::MethodCall(method.parse_args(input)?)),
+                }
             } else if ahead.peek(Paren) {
                 Err(ahead.error(
                     "parentheses are ambiguous in this position, \
@@ -168,25 +178,34 @@ impl Parse for TraitMethod {
 // TODO: attrs are silently removed
 impl Parse for FormatExpr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        match input.parse::<Expr>()? {
-            Expr::Lit(ExprLit {
-                attrs: _, // can the format literal have attributes?
-                lit: Lit::Str(format),
-            }) => Ok(Self::Format(format)),
-            Expr::Path(ExprPath { path, .. }) if path.get_ident().is_some() => {
-                Err(syn::Error::new(
-                    path.span(),
-                    "bare identifiers are disallowed, please reference or wrap with an expression",
-                ))
+        if input.peek(Token![.]) && input.peek2(Brace) {
+            let content;
+            Ok(Self::Seq {
+                dot: input.parse()?,
+                brace: braced!(content in input),
+                seq: FormatSeq::parse_terminated(&content)?,
+            })
+        } else {
+            match input.parse::<Expr>()? {
+                Expr::Lit(ExprLit {
+                    attrs: _, // can the format literal have attributes?
+                    lit: Lit::Str(format),
+                }) => Ok(Self::Format(format)),
+                Expr::Path(ExprPath { path, .. }) if path.get_ident().is_some() => {
+                    Err(syn::Error::new(
+                        path.span(),
+                        "bare identifiers are disallowed, please reference or wrap with an expression",
+                    ))
+                }
+                Expr::Call(expr_call) => match expr_call.func.as_ref() {
+                    Expr::Path(_) => Ok(Self::Verbatim(expr_call.into())),
+                    _ => Err(syn::Error::new(
+                        expr_call.func.span(),
+                        "expression calls are not supported here",
+                    )),
+                },
+                expr => Ok(Self::Verbatim(expr)),
             }
-            Expr::Call(expr_call) => match expr_call.func.as_ref() {
-                Expr::Path(_) => Ok(Self::Verbatim(expr_call.into())),
-                _ => Err(syn::Error::new(
-                    expr_call.func.span(),
-                    "expression calls are not supported here",
-                )),
-            },
-            expr => Ok(Self::Verbatim(expr)),
         }
     }
 }
@@ -248,6 +267,9 @@ impl TryFrom<FormatSeg> for Expr {
     fn try_from(segment: FormatSeg) -> syn::Result<Self> {
         let expr = match segment.expr {
             FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
+            FormatExpr::Seq { seq, .. } => {
+                Expr::Verbatim(FormatArgs::try_from(seq)?.into_token_stream())
+            }
             FormatExpr::Verbatim(expr) => expr,
         };
         Ok(segment.ops.into_iter().fold(expr, |acc, (_, op)| {
