@@ -1,6 +1,6 @@
 use proc_macro::TokenStream as TokenStream1;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned as _;
@@ -10,8 +10,11 @@ use syn::{
     ExprPath, Ident, Lit, LitStr, Token,
 };
 
-pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2>) -> TokenStream1 {
+pub(crate) fn proc_macro_impl<T: ToTokens>(
+    tokens2: impl FnOnce() -> syn::Result<T>,
+) -> TokenStream1 {
     tokens2()
+        .map(ToTokens::into_token_stream)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -19,24 +22,18 @@ pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2
 #[proc_macro]
 pub fn format_args_colored(tokens: TokenStream1) -> TokenStream1 {
     proc_macro_impl(|| {
-        let segments = FormatSeq::parse_terminated.parse(tokens)?;
-        let mut format_str = String::new();
-        let mut format_args = Punctuated::<Expr, Token![,]>::new();
-        for (styled, punct) in segments.into_pairs().map(Pair::into_tuple) {
-            match punct {
-                Some(FormatPunct::Comma(_)) => format_str.push_str("{} "),
-                Some(FormatPunct::Semi(_)) => format_str.push_str("{}\n"),
-                None | Some(FormatPunct::Concat) => format_str.push_str("{}"),
-            }
-            format_args.push(styled.into_expr());
-        }
-        Ok(quote! {
-            format_args!(#format_str, #format_args)
-        })
+        FormatSeq::parse_terminated
+            .parse(tokens)
+            .and_then(FormatArgs::try_from)
     })
 }
 
 type FormatSeq = Punctuated<FormatSeg, FormatPunct>;
+
+struct FormatArgs {
+    pub literal: String,
+    pub args: Punctuated<Expr, Token![,]>,
+}
 
 struct FormatSeg {
     pub ops: Vec<(Token![:], FormatOp)>,
@@ -232,5 +229,33 @@ impl Parse for FormatPunct {
             // so something *must* follow to concatenate.
             Ok(Self::Concat)
         }
+    }
+}
+
+impl ToTokens for FormatArgs {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let FormatArgs { literal, args } = self;
+        tokens.extend(quote!(format_args!(#literal, #args)))
+    }
+}
+
+impl TryFrom<FormatSeq> for FormatArgs {
+    type Error = syn::Error;
+
+    fn try_from(segments: FormatSeq) -> syn::Result<Self> {
+        let mut format_str = String::new();
+        let mut format_args = Punctuated::<Expr, Token![,]>::new();
+        for (styled, punct) in segments.into_pairs().map(Pair::into_tuple) {
+            match punct {
+                Some(FormatPunct::Comma(_)) => format_str.push_str("{} "),
+                Some(FormatPunct::Semi(_)) => format_str.push_str("{}\n"),
+                None | Some(FormatPunct::Concat) => format_str.push_str("{}"),
+            }
+            format_args.push(styled.into_expr());
+        }
+        Ok(Self {
+            literal: format_str,
+            args: format_args,
+        })
     }
 }
