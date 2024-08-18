@@ -70,18 +70,6 @@ enum FormatPunct {
     Concat,
 }
 
-impl FormatSeg {
-    fn into_expr(self) -> Expr {
-        let expr = match self.expr {
-            FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
-            FormatExpr::Verbatim(expr) => expr,
-        };
-        self.ops.into_iter().fold(expr, |acc, (_, op)| {
-            Expr::MethodCall(op.into_call_with_expr(acc))
-        })
-    }
-}
-
 impl FormatOp {
     fn into_call_with_expr(self, expr: Expr) -> ExprMethodCall {
         match self {
@@ -118,12 +106,6 @@ impl TraitMethod {
             paren_token: parenthesized!(content in input),
             args: content.parse_terminated(Expr::parse, Token![,])?,
         })
-    }
-}
-
-impl From<FormatSeg> for Expr {
-    fn from(value: FormatSeg) -> Self {
-        value.into_expr()
     }
 }
 
@@ -251,11 +233,25 @@ impl TryFrom<FormatSeq> for FormatArgs {
                 Some(FormatPunct::Semi(_)) => format_str.push_str("{}\n"),
                 None | Some(FormatPunct::Concat) => format_str.push_str("{}"),
             }
-            format_args.push(styled.into_expr());
+            format_args.push(styled.try_into()?);
         }
         Ok(Self {
             literal: format_str,
             args: format_args,
         })
+    }
+}
+
+impl TryFrom<FormatSeg> for Expr {
+    type Error = syn::Error;
+
+    fn try_from(segment: FormatSeg) -> syn::Result<Self> {
+        let expr = match segment.expr {
+            FormatExpr::Format(format) => parse_quote!(format_args!(#format)),
+            FormatExpr::Verbatim(expr) => expr,
+        };
+        Ok(segment.ops.into_iter().fold(expr, |acc, (_, op)| {
+            Expr::MethodCall(op.into_call_with_expr(acc))
+        }))
     }
 }
