@@ -160,6 +160,12 @@ impl Parse for FormatExpr {
                 attrs: _, // can the format literal have attributes?
                 lit: Lit::Str(format),
             }) => Ok(Self::Format(format)),
+            Expr::Path(ExprPath { path, .. }) if path.get_ident().is_some() => {
+                Err(syn::Error::new(
+                    path.span(),
+                    "bare identifiers are ambiguous, please reference or wrap with an expression",
+                ))
+            }
             expr => Ok(Self::Verbatim(expr)),
         }
     }
