@@ -173,11 +173,22 @@ impl Parse for FormatExpr {
 
 impl Parse for FormatPunct {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![,]) {
+        if input.is_empty() {
+            // If there is a case that this is parsed with the correct function,
+            // but this branch is entered anyway, this panic can be replaced with an error.
+            panic!(
+                "punctuation should have been parsed by syn::Punctuated::parse_terminated, \
+                which does not expect trailing punctuation"
+            )
+        } else if input.peek(Token![,]) {
             Ok(Self::Comma(input.parse().unwrap()))
         } else if input.peek(Token![;]) {
             Ok(Self::Semi(input.parse().unwrap()))
         } else {
+            // Not parsing one of the tokens means
+            // that another syntax item follows.
+            // This should have panicked at EOI,
+            // so something *must* follow to concatenate.
             Ok(Self::Concat)
         }
     }
