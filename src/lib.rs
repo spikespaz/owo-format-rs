@@ -200,6 +200,13 @@ impl Parse for FormatExpr {
                     "bare identifiers are ambiguous, please reference or wrap with an expression",
                 ))
             }
+            Expr::Call(expr_call) => match expr_call.func.as_ref() {
+                Expr::Path(_) => Ok(Self::Verbatim(expr_call.into())),
+                _ => Err(syn::Error::new(
+                    expr_call.func.span(),
+                    "expression calls are not supported here",
+                )),
+            },
             expr => Ok(Self::Verbatim(expr)),
         }
     }
