@@ -44,12 +44,20 @@ fn main() {
 
     // Bare identifiers should not work
     // This is to disambiguate from function identifiers.
-    let fail = "fail bare identifier";
-    logln!(fail);
+    // format_args_colored!(:bright_red fail);
 
     // Identifiers should be in an expression (either inline or block) or a borrow.
     let ok = "identifier as expression or borrow";
     logln!((ok); {ok}; &ok);
+
+    // Parenthesized items are expressions (not method arguments) because
+    // they are either followed by punctuation or EOF.
+    format_args_colored!(:green (ok));
+    format_args_colored!(:green (ok), :green (ok));
+    format_args_colored!(:green (ok) :blue (ok));
+    // If they are punctuated with `Concat`, parentheses are ambiguous.
+    // format_args_colored!(:green (ok) (ok) (ok));
+    // format_args_colored!(:green (ok) {ok} (ok));
 
     // Expressions don't need to have braces or parentheses.
     logln!(

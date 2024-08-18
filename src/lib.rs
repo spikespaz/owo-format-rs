@@ -3,10 +3,11 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::{Pair, Punctuated};
+use syn::spanned::Spanned as _;
 use syn::token::Paren;
 use syn::{
     parenthesized, parse_quote, AngleBracketedGenericArguments, Expr, ExprLit, ExprMethodCall,
-    Ident, Lit, LitStr, Token,
+    ExprPath, Ident, Lit, LitStr, Token,
 };
 
 pub(crate) fn proc_macro_impl(tokens2: impl FnOnce() -> syn::Result<TokenStream2>) -> TokenStream1 {
@@ -109,6 +110,20 @@ impl FormatOp {
     }
 }
 
+impl TraitMethod {
+    pub fn parse_args<'p>(self, input: impl Into<ParseStream<'p>>) -> syn::Result<TraitMethodCall> {
+        let input = input.into();
+        let TraitMethod { method, turbofish } = self;
+        let content;
+        Ok(TraitMethodCall {
+            method,
+            turbofish,
+            paren_token: parenthesized!(content in input),
+            args: content.parse_terminated(Expr::parse, Token![,])?,
+        })
+    }
+}
+
 impl From<FormatSeg> for Expr {
     fn from(value: FormatSeg) -> Self {
         value.into_expr()
@@ -132,23 +147,42 @@ impl Parse for FormatSeg {
 
 impl Parse for FormatOp {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let method = input.parse()?;
-        let turbofish = if input.peek(Token![::]) {
-            Some(AngleBracketedGenericArguments::parse_turbofish(input)?)
-        } else {
-            None
-        };
+        let method = input.parse::<TraitMethod>()?;
+
         if input.peek(Paren) {
-            let content;
-            Ok(Self::MethodCall(TraitMethodCall {
-                method,
-                turbofish,
-                paren_token: parenthesized!(content in input),
-                args: content.parse_terminated(Expr::parse, Token![,])?,
-            }))
+            let ahead = input.fork();
+            let _content;
+            let _paren = parenthesized!(_content in ahead);
+            // skipped the parenthesized item
+            #[allow(clippy::if_same_then_else)]
+            if ahead.is_empty() {
+                Ok(FormatOp::Method(method))
+            } else if ahead.cursor().punct().is_some() {
+                Ok(FormatOp::Method(method))
+            } else if ahead.peek(Paren) {
+                Err(ahead.error(
+                    "parentheses are ambiguous in this position, \
+                consider using alternative delimiters or additional punctuation",
+                ))
+            } else {
+                Ok(FormatOp::MethodCall(method.parse_args(input)?))
+            }
         } else {
-            Ok(Self::Method(TraitMethod { method, turbofish }))
+            Ok(FormatOp::Method(method))
         }
+    }
+}
+
+impl Parse for TraitMethod {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            method: input.parse()?,
+            turbofish: if input.peek(Token![::]) {
+                Some(AngleBracketedGenericArguments::parse_turbofish(input)?)
+            } else {
+                None
+            },
+        })
     }
 }
 
